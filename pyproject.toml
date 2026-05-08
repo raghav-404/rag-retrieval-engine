@@ -1,0 +1,16 @@
+[project]
+name = "ragretrieval"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faiss-cpu==1.8.0",
+    "fastapi==0.111.0",
+    "numpy==1.26.4",
+    "pydantic==2.7.1",
+    "requests==2.32.3",
+    "sentence-transformers==3.0.1",
+    "streamlit==1.35.0",
+    "uvicorn==0.29.0",
+]

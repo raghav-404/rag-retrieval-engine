@@ -1,0 +1,21 @@
+Support Policy and Escalation Notes
+
+Support hours are Monday through Friday from 9:00 AM to 6:00 PM local time.
+Urgent issues can be reported outside normal hours, but response time may be delayed.
+
+Issue severity levels:
+- Low: Minor inconvenience, workaround available
+- Medium: Feature is broken for one user or one workflow
+- High: Major workflow blocked for multiple users
+- Critical: Service unavailable or data integrity at risk
+
+Escalation process:
+1. Confirm the issue and gather reproduction steps.
+2. Check logs, recent deployments, and configuration changes.
+3. Assign the ticket to the on-call engineer if severity is high or critical.
+4. Update the user with a clear status and next check-in time.
+
+Policy reminders:
+- Never promise a fix before root cause is known.
+- Always include the ticket number in follow-up messages.
+- Preserve evidence such as screenshots, timestamps, and error messages.

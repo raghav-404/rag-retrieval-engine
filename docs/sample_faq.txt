@@ -1,0 +1,16 @@
+Frequently Asked Questions
+
+Q: How do I add documents to the system?
+A: Put .txt files into the docs folder, then run the ingestion script.
+
+Q: What files are supported?
+A: This test project expects plain text files only.
+
+Q: What happens if the answer is not found in the context?
+A: The assistant should say that the context does not contain enough information.
+
+Q: Why are sources shown in the UI?
+A: Sources help users verify where the answer came from and make the system more trustworthy.
+
+Q: What should I do if the backend is down?
+A: Check whether the FastAPI server is running, then confirm the index files exist.

@@ -1,0 +1,20 @@
+RAG Retrieval Co. Company Overview
+
+RAG Retrieval Co. builds local search and question-answering tools for internal documents.
+The platform is designed to help teams find answers quickly without sending data to a cloud API.
+
+Core goals:
+- Keep document ingestion simple
+- Support both keyword and semantic search
+- Return answers with source references
+- Make the system easy to run on a laptop or workstation
+
+Typical workflow:
+1. Place plain text files into the docs folder.
+2. Run the ingestion script to build the vector index.
+3. Ask questions through the API or chat UI.
+4. Review the answer, the sources used, and the retrieval score.
+
+The engineering team prefers small modules with clear responsibilities.
+In production, the system should fail loudly if the index is missing or stale.
+The most important documents are project notes, product guides, and internal policies.
