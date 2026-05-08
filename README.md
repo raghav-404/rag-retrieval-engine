@@ -134,12 +134,6 @@ Response:
 }
 ```
 
-## Notes Before Publishing
-
-- Do not commit `.venv/`, `__pycache__/`, `faiss.index`, or `metadata.json`
-- Remove or replace any private documents in `docs/` before pushing
-- Keep sample docs only if you want the repo to be immediately demoable
-
 ## Future Improvements
 
 - Add tests for ingestion and retrieval behavior
