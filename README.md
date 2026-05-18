@@ -1,129 +1,176 @@
-# RAG Retrieval
+# rag-retrieval-engine
 
-A local Retrieval-Augmented Generation (RAG) app built with FastAPI, Streamlit, FAISS, sentence-transformers, and Ollama.
+A local-first Retrieval-Augmented Generation system for document question answering, built with FastAPI, FAISS, sentence-transformers, Ollama, and a small Streamlit demo UI.
 
-It ingests plain-text documents, builds a vector index, retrieves relevant chunks with hybrid search, and answers questions with source-aware responses.
+It focuses on the practical parts of a small RAG system: document ingestion, chunking, embedding, hybrid retrieval, grounding, local model orchestration, and lightweight evaluation.
 
-## Features
+## Overview
 
-- Local-first stack with no hosted LLM dependency
-- Hybrid retrieval using FAISS dense search plus BM25-style sparse scoring
-- Query rewriting to improve retrieval for vague questions
-- Lightweight reranking before answer generation
-- FastAPI backend and Streamlit chat UI
-- Source tracking and a simple faithfulness-style evaluation score
+Many RAG demos are dense-only retrieval wrapped in a chat UI. This repo is more deliberate about the retrieval stack and the system tradeoffs:
 
-## Tech Stack
+- combines dense retrieval with BM25-style sparse scoring
+- rewrites the user query before retrieval to improve recall
+- separates ingestion from serving so the data pipeline is explicit
+- keeps the serving layer simple while preserving a real API boundary
+- runs entirely locally with Ollama, which makes model behavior easier to test and reason about
+- includes a small test suite covering chunking, ingestion, retrieval shape, and API health
+
+## What It Does
+
+Given a folder of `.txt` documents, the system:
+
+1. cleans and chunks the documents
+2. embeds each chunk with `all-MiniLM-L6-v2`
+3. stores vectors in FAISS and chunk metadata in JSON
+4. rewrites the user query for better retrieval
+5. combines dense similarity with BM25-style sparse scoring
+6. builds a grounded context window from the top results
+7. asks a local Ollama model to answer using only that context
+8. computes a lightweight answer grounding score and retries with the original query when needed
+
+## Stack
 
 - Python 3.12+
 - FastAPI
 - Streamlit
 - FAISS
-- sentence-transformers (`all-MiniLM-L6-v2`)
-- Ollama (`qwen2.5:7b`)
+- sentence-transformers
+- Ollama
+- pytest
 
-## Project Structure
-
-| File | Purpose |
-| --- | --- |
-| `app.py` | Streamlit frontend for asking questions and viewing sources |
-| `backend.py` | FastAPI API with `POST /ask` and `GET /health` |
-| `ingest.py` | Reads `.txt` files from `docs/` and builds the retrieval index |
-| `rag.py` | Core retrieval, reranking, prompting, and evaluation pipeline |
-| `utils.py` | Text cleaning, chunking, and embedding helpers |
-| `docs/` | Sample source documents for indexing |
-
-## How It Works
+## Architecture
 
 ```text
-Question
-  -> Query rewrite
-  -> Dense retrieval (FAISS)
-  -> Sparse scoring (BM25-style)
-  -> Heuristic rerank
-  -> Context assembly
-  -> Ollama answer generation
-  -> Eval score and source return
+docs/*.txt
+  -> ingestion.py
+  -> faiss.index + metadata.json
+  -> retrieval.py
+  -> FastAPI /ask
+  -> Streamlit demo UI
 ```
 
-## Getting Started
+Core modules:
+
+- `src/rag_retrieval_engine/config.py`: local settings for paths, model names, top-k, and Ollama URL
+- `src/rag_retrieval_engine/ingestion.py`: document loading, chunking, embedding, and index building
+- `src/rag_retrieval_engine/retrieval.py`: artifact loading, hybrid retrieval, context assembly, and answer generation
+- `src/rag_retrieval_engine/api/app.py`: FastAPI app with `/health` and `/ask`
+- `src/rag_retrieval_engine/ui/streamlit_app.py`: lightweight demo client
+
+Retrieval pipeline:
+
+```text
+question
+  -> query rewrite
+  -> embedding lookup in FAISS
+  -> BM25-style lexical scoring
+  -> score fusion
+  -> top-k context assembly
+  -> Ollama answer generation
+  -> lightweight grounding check
+```
+
+Thin root entrypoints are kept so local commands stay simple:
+
+- `python ingest.py`
+- `uvicorn backend:app --reload`
+- `streamlit run app.py`
+
+## Applied AI Notes
+
+- Dense retrieval handles semantic similarity, while the BM25-style component helps recover lexical matches that embeddings can miss.
+- Query rewriting is intentionally small and cheap, but it improves the chances of retrieving the right chunks for underspecified questions.
+- The answer layer is grounded against retrieved context rather than treating the LLM as the source of truth.
+- The evaluation step is simple, but it reflects the right instinct: retrieval quality should influence generation behavior.
+- The whole stack is local-first, which is useful for debugging, iteration speed, privacy-sensitive use cases, and cost control.
+
+## Design Choices
+
+- The project emphasizes retrieval-system behavior, not just prompt orchestration.
+- The code is modular without introducing extra infrastructure.
+- FastAPI is treated as the real interface; Streamlit is just a demo surface.
+- The app does not assume cloud infrastructure, vector databases, or extra services unless they are actually needed.
+- Error handling focuses on realistic failure modes like missing retrieval artifacts or bad requests.
+
+## Local Setup
 
 ### 1. Install dependencies
 
-Using `pip`:
-
-```bash
-pip install -r requirements.txt
-```
-
-Or using `uv`:
+Using `uv`:
 
 ```bash
 uv sync
 ```
 
-### 2. Start Ollama and pull the model
+Or using the existing virtualenv approach:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Start Ollama
+
+Pull the model:
 
 ```bash
 ollama pull qwen2.5:7b
 ```
 
-Make sure the Ollama server is running locally at `http://localhost:11434`.
+Run Ollama locally so the API is available at `http://localhost:11434`.
 
-### 3. Add or replace documents
+### 3. Add documents
 
-Put `.txt` files inside `docs/`.
+Place `.txt` files in `docs/`.
 
-The repository includes sample files for demo purposes:
+Sample files included in this repo:
 
 - `docs/sample_company_overview.txt`
 - `docs/sample_faq.txt`
 - `docs/sample_product_specs.txt`
 - `docs/sample_support_policy.txt`
 
-### 4. Build the index
+### 4. Build the retrieval artifacts
 
 ```bash
 python ingest.py
 ```
 
-This generates:
+This creates:
 
 - `faiss.index`
 - `metadata.json`
 
-These files are local build artifacts and are ignored by Git.
-
-### 5. Run the backend
+### 5. Run the API
 
 ```bash
 uvicorn backend:app --reload
 ```
 
-### 6. Run the frontend
+### 6. Run the demo UI
 
 ```bash
 streamlit run app.py
 ```
 
-Then open `http://localhost:8501`.
+## How To Test
 
-## API Example
+Automated tests:
 
-Request:
-
-```http
-POST /ask
-Content-Type: application/json
+```bash
+python -m pytest --basetemp .pytest-tmp -p no:cacheprovider
 ```
 
-```json
-{
-  "question": "What is the support response window?"
-}
+Manual API smoke test:
+
+```bash
+curl http://127.0.0.1:8000/health
 ```
 
-Response:
+```bash
+curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\":\"What is the support response window?\"}"
+```
+
+## Example API Response
 
 ```json
 {
@@ -134,9 +181,33 @@ Response:
 }
 ```
 
-## Future Improvements
+## Tradeoffs
 
-- Add tests for ingestion and retrieval behavior
-- Support PDF or Markdown document ingestion
-- Add configurable chunking and retrieval parameters
-- Improve evaluation with stronger groundedness checks
+This repo is intentionally strong on retrieval clarity and local reproducibility, not breadth.
+
+What it does well:
+
+- clear end-to-end RAG flow
+- understandable retrieval and serving boundaries
+- fully local model + retrieval stack
+- easy experimentation with chunking, retrieval, and prompting behavior
+
+What is still prototype-level:
+
+- `.txt`-only ingestion
+- heuristic reranking and lightweight grounding score
+- no auth, persistence layer, or background jobs
+- no production observability or deployment story
+
+## What I Would Build Next
+
+- support Markdown and PDF ingestion
+- cache embeddings and artifact metadata more explicitly
+- add retrieval diagnostics such as score breakdowns and hit inspection
+- benchmark chunking and retrieval settings on a small evaluation set
+- improve groundedness evaluation beyond token overlap
+- optionally swap FAISS + local files for a more scalable artifact layer if the use case required it
+
+## Summary
+
+A small, local-first hybrid RAG system with explicit ingestion, retrieval, and serving boundaries. The implementation stays simple, but still captures the parts of the workflow that matter most in practice: retrieval quality, grounded generation, and repeatable local testing.

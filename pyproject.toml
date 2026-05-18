@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "ragretrieval"
+name = "rag-retrieval-engine"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local-first hybrid RAG retrieval engine with FastAPI, Streamlit demo UI, FAISS, and Ollama."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,3 +18,9 @@ dependencies = [
     "streamlit==1.35.0",
     "uvicorn==0.29.0",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
