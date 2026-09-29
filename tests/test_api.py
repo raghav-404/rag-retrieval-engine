@@ -1,26 +1,26 @@
+import importlib
+
 from fastapi.testclient import TestClient
 
 from rag_retrieval_engine.api.app import create_app
-from rag_retrieval_engine.config import AppConfig
+from rag_retrieval_engine.ingestion import build_index
+from rag_retrieval_engine.retrieval import load_artifacts
 
 
-def test_health_endpoint_reports_ok(tmp_path) -> None:
-    config = AppConfig(
-        project_root=tmp_path,
-        docs_dir=tmp_path / "docs",
-        index_path=tmp_path / "faiss.index",
-        metadata_path=tmp_path / "metadata.json",
-        ollama_url="http://localhost:11434/api/generate",
-        model_name="qwen2.5:7b",
-        embed_model_name="test-embedder",
-        top_k=2,
-        rerank_top_n=2,
-        eval_threshold=0.08,
-        api_url="http://localhost:8000/ask",
-    )
-    app = create_app(config)
-
-    response = TestClient(app).get("/health")
-
+def test_health_endpoint_reports_artifact_status(config) -> None:
+    response = TestClient(create_app(config)).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "artifacts_ready": False}
+
+
+def test_retrieve_endpoint_returns_cited_chunks_without_model_download(config, tokenizer, embeddings, monkeypatch) -> None:
+    config.docs_dir.joinpath("policy.txt").write_text("alpha beta gamma", encoding="utf-8")
+    build_index(config, embeddings=embeddings, tokenizer=tokenizer)
+    engine = load_artifacts(config, embeddings=embeddings)
+    api_module = importlib.import_module("rag_retrieval_engine.api.app")
+    monkeypatch.setattr(api_module, "load_artifacts", lambda _: engine)
+
+    response = TestClient(create_app(config)).post("/retrieve", json={"question": "alpha", "mode": "sparse"})
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["chunk_id"] == "policy_txt_chunk_0001"

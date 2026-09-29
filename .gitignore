@@ -18,6 +18,7 @@ wheels/
 # Generated retrieval artifacts
 faiss.index
 metadata.json
+manifest.json
 
 # App/runtime files
 .streamlit/

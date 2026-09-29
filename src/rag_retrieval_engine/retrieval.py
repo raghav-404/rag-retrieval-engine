@@ -1,122 +1,177 @@
 from __future__ import annotations
 
 import json
-import math
-from collections import Counter
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
 
 import faiss
-import numpy as np
-import requests
-from sentence_transformers import SentenceTransformer
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_community.docstore.in_memory import InMemoryDocstore
+from langchain_community.retrievers import BM25Retriever
+from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores.utils import DistanceStrategy
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
 
 from .config import AppConfig
+from .embeddings import create_embeddings
+from .ingestion import ARTIFACT_VERSION, file_hash
 
-_embedder: SentenceTransformer | None = None
+RetrievalMode = Literal["dense", "sparse", "hybrid"]
+
+
+def bm25_tokens(text: str) -> list[str]:
+    """Match words despite case and surrounding punctuation."""
+    return re.findall(r"\w+", text.casefold())
 
 
 class ArtifactsNotReadyError(FileNotFoundError):
-    pass
+    """Ingestion has not produced every required artifact."""
+
+
+class ArtifactValidationError(ValueError):
+    """Saved artifacts are stale, corrupted, or incompatible."""
 
 
 def artifacts_ready(config: AppConfig) -> bool:
-    return config.index_path.exists() and config.metadata_path.exists()
+    return all(path.is_file() for path in (config.index_path, config.metadata_path, config.manifest_path))
 
 
-def embed_query(query: str, config: AppConfig) -> np.ndarray:
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer(config.embed_model_name)
-    return _embedder.encode([query], normalize_embeddings=True)[0]
+@dataclass
+class RetrievalEngine:
+    """Keep all three LangChain retrievers callable and visible."""
+
+    dense_retriever: BaseRetriever
+    sparse_retriever: BM25Retriever
+    hybrid_retriever: EnsembleRetriever
+    documents: list[Document]
+    manifest: dict
+    final_k: int
+
+    def search(self, question: str, mode: RetrievalMode = "hybrid", *, k: int | None = None) -> list[Document]:
+        if not question.strip():
+            raise ValueError("Question cannot be empty.")
+        if mode not in ("dense", "sparse", "hybrid"):
+            raise ValueError(f"Unknown retrieval mode: {mode}")
+        limit = self.final_k if k is None else k
+        if limit <= 0:
+            raise ValueError("k must be positive.")
+        retriever = {
+            "dense": self.dense_retriever,
+            "sparse": self.sparse_retriever,
+            "hybrid": self.hybrid_retriever,
+        }[mode]
+        return retriever.invoke(question)[:limit]
 
 
-def load_artifacts(config: AppConfig) -> tuple[faiss.Index, list[dict[str, str]], list[str], dict[str, float], float]:
-    missing = [str(path) for path in (config.index_path, config.metadata_path) if not path.exists()]
+def load_artifacts(config: AppConfig, *, embeddings: Embeddings | None = None) -> RetrievalEngine:
+    """Validate local files, then restore FAISS and build BM25 over every chunk."""
+    config.validate()
+    missing = [str(path) for path in (config.index_path, config.metadata_path, config.manifest_path) if not path.is_file()]
     if missing:
         raise ArtifactsNotReadyError("Run `python ingest.py` first. Missing: " + ", ".join(missing))
-    metadata = json.loads(config.metadata_path.read_text(encoding="utf-8"))
-    corpus = [item["text"] for item in metadata]
-    idf = {
-        token: math.log((len(corpus) - freq + 0.5) / (freq + 0.5) + 1)
-        for token, freq in Counter(token for doc in corpus for token in set(doc.lower().split())).items()
-    }
-    avg_len = sum(len(doc.split()) for doc in corpus) / max(len(corpus), 1)
-    return faiss.read_index(str(config.index_path)), metadata, corpus, idf, avg_len
-
-
-def search(query: str, artifacts: tuple, config: AppConfig, *, embed_fn=embed_query) -> list[dict[str, object]]:
-    index, metadata, corpus, idf, avg_len = artifacts
-    scores, indices = index.search(embed_fn(query, config).astype(np.float32).reshape(1, -1), config.top_k)
-    q_tokens, results = query.lower().split(), []
-    for dense, idx in zip(scores[0], indices[0]):
-        if idx == -1:
-            continue
-        tokens, tf, score = corpus[idx].lower().split(), Counter(corpus[idx].lower().split()), 0.0
-        for token in q_tokens:
-            freq = tf.get(token, 0)
-            if freq:
-                score += idf.get(token, 0.0) * (freq * 2.5) / (freq + 1.5 * (0.25 + 0.75 * len(tokens) / max(avg_len, 1)))
-        overlap = len(set(q_tokens) & set(tokens)) / max(len(set(q_tokens)), 1)
-        results.append({
-            "meta": metadata[idx],
-            "score": 0.6 * float(dense) + 0.4 * (score / (score + 1)) + 0.15 * overlap,
-            "idx": int(idx),
-        })
-    return sorted(results, key=lambda item: item["score"], reverse=True)[: config.rerank_top_n]
-
-
-def hybrid_search(query: str, artifacts: tuple, config: AppConfig, *, embed_fn=embed_query) -> list[dict[str, object]]:
-    return search(query, artifacts, config, embed_fn=embed_fn)
-
-
-def build_context(results: list[dict[str, object]]) -> str:
-    return "\n\n---\n\n".join(
-        f"[{i}] (source: {r['meta']['source']})\n{r['meta']['text']}" for i, r in enumerate(results, 1)
-    )
-
-
-def ollama(prompt: str, config: AppConfig, timeout: int, http=requests) -> str:
     try:
-        response = http.post(
-            config.ollama_url,
-            json={"model": config.model_name, "prompt": prompt, "stream": False},
-            timeout=timeout,
+        manifest = json.loads(config.manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ArtifactValidationError("Manifest is unreadable; run ingestion again.") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != ARTIFACT_VERSION:
+        raise ArtifactValidationError("Artifact schema version is incompatible; run ingestion again.")
+    try:
+        created_at = datetime.fromisoformat(manifest["created_at"])
+        if created_at.tzinfo is None:
+            raise ValueError("Timestamp needs a timezone.")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ArtifactValidationError("Manifest creation timestamp is invalid; run ingestion again.") from exc
+    if manifest.get("embedding_model") != config.embed_model_name:
+        raise ArtifactValidationError("Embedding model differs from the manifest; run ingestion again.")
+    if (manifest.get("chunk_size"), manifest.get("chunk_overlap")) != (config.chunk_size, config.chunk_overlap):
+        raise ArtifactValidationError("Chunk settings differ from the manifest; run ingestion again.")
+
+    hashes = manifest.get("artifact_hashes")
+    try:
+        artifacts_match = isinstance(hashes, dict) and all(
+            hashes.get(name) == file_hash(path)
+            for name, path in (("index", config.index_path), ("metadata", config.metadata_path))
         )
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except Exception:
-        return ""
+    except OSError as exc:
+        raise ArtifactValidationError("Index or chunk metadata is unreadable; run ingestion again.") from exc
+    if not artifacts_match:
+        raise ArtifactValidationError("Index or chunk metadata is corrupted; run ingestion again.")
+    source_hashes = manifest.get("source_hashes")
+    current_sources = {path.name: path for path in config.docs_dir.glob("*.txt")}
+    try:
+        sources_match = (
+            isinstance(source_hashes, dict)
+            and set(source_hashes) == set(current_sources)
+            and all(source_hashes[name] == file_hash(path) for name, path in current_sources.items())
+        )
+    except OSError as exc:
+        raise ArtifactValidationError("Source documents are unreadable; run ingestion again.") from exc
+    if not sources_match:
+        raise ArtifactValidationError("Source documents changed since ingestion; run ingestion again.")
 
+    try:
+        records = json.loads(config.metadata_path.read_text(encoding="utf-8"))
+        documents = [
+            Document(
+                id=item["metadata"]["chunk_id"],
+                page_content=item["page_content"],
+                metadata=item["metadata"],
+            )
+            for item in records
+        ]
+        ids = [doc.metadata["chunk_id"] for doc in documents]
+        valid = (
+            isinstance(records, list)
+            and len(documents) > 0
+            and len(documents) == manifest.get("chunk_count")
+            and len(ids) == len(set(ids))
+            and all(
+                isinstance(doc.page_content, str)
+                and doc.page_content.strip()
+                and doc.metadata.get("source") in source_hashes
+                and isinstance(doc.metadata.get("position"), int)
+                and isinstance(doc.metadata.get("token_count"), int)
+                and doc.metadata["token_count"] > 0
+                for doc in documents
+            )
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ArtifactValidationError("Chunk metadata is malformed; run ingestion again.") from exc
+    if not valid:
+        raise ArtifactValidationError("Chunk metadata does not match the manifest; run ingestion again.")
 
-def answer_once(query: str, search_query: str, artifacts: tuple, config: AppConfig, *, embed_fn=embed_query, http=requests):
-    results = search(search_query, artifacts, config, embed_fn=embed_fn)
-    context = build_context(results)
-    answer = ollama(
-        f"You are a helpful assistant. Answer using ONLY this context.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:",
-        config,
-        120,
-        http,
+    try:
+        index = faiss.read_index(str(config.index_path))
+    except (OSError, RuntimeError) as exc:
+        raise ArtifactValidationError("FAISS index is unreadable; run ingestion again.") from exc
+    if (
+        index.d != manifest.get("embedding_dimension")
+        or index.ntotal != len(documents)
+        or index.metric_type != faiss.METRIC_INNER_PRODUCT
+    ):
+        raise ArtifactValidationError("FAISS index dimensions, count, or metric do not match the manifest.")
+    embeddings = embeddings or create_embeddings(config)
+    if len(embeddings.embed_query("dimension check")) != index.d:
+        raise ArtifactValidationError("Embedding model dimension differs from the FAISS index.")
+
+    # The verified JSON replaces LangChain's pickle docstore when restoring FAISS.
+    store = FAISS(
+        embedding_function=embeddings,
+        index=index,
+        docstore=InMemoryDocstore({doc.metadata["chunk_id"]: doc for doc in documents}),
+        index_to_docstore_id={position: doc.metadata["chunk_id"] for position, doc in enumerate(documents)},
+        distance_strategy=DistanceStrategy.MAX_INNER_PRODUCT,
     )
-    score = 0.0 if not answer else len(set(answer.lower().split()) & set(context.lower().split())) / len(set(answer.lower().split()))
-    return results, answer, score
-
-
-def ask(query: str, config: AppConfig, *, embed_fn=embed_query, http=requests) -> dict[str, object]:
-    artifacts = load_artifacts(config)
-    rewritten = ollama(
-        "Rewrite the following search query to improve document retrieval. Return ONLY the rewritten query.\n"
-        f"Query: {query}",
-        config,
-        30,
-        http,
-    ) or query
-    results, answer, score = answer_once(query, rewritten, artifacts, config, embed_fn=embed_fn, http=http)
-    if score < config.eval_threshold:
-        fallback = answer_once(query, query, artifacts, config, embed_fn=embed_fn, http=http)
-        if fallback[2] > score:
-            results, answer, score = fallback
-    return {
-        "answer": answer,
-        "sources": sorted({result["meta"]["source"] for result in results}),
-        "rewritten_query": rewritten,
-        "eval_score": round(score, 3),
-    }
+    dense = store.as_retriever(search_kwargs={"k": config.dense_candidates})
+    sparse = BM25Retriever.from_documents(documents, k=config.sparse_candidates, preprocess_func=bm25_tokens)
+    hybrid = EnsembleRetriever(
+        retrievers=[dense, sparse],
+        weights=[config.dense_weight, config.sparse_weight],
+        c=config.rrf_constant,
+        id_key="chunk_id",
+    )
+    return RetrievalEngine(dense, sparse, hybrid, documents, manifest, config.final_k)

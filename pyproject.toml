@@ -5,17 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rag-retrieval-engine"
 version = "0.1.0"
-description = "Local-first hybrid RAG retrieval engine with FastAPI, Streamlit demo UI, FAISS, and Ollama."
+description = "Explainable hybrid RAG retrieval engine with LangChain, FAISS, and BM25."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "faiss-cpu==1.8.0",
     "fastapi==0.111.0",
+    "langchain==1.4.3",
+    "langchain-classic==1.0.8",
+    "langchain-community==0.4.2",
+    "langchain-core==1.6.6",
+    "langchain-huggingface==1.2.2",
+    "langchain-text-splitters==1.1.2",
     "numpy==1.26.4",
-    "pydantic==2.7.1",
-    "requests==2.32.3",
-    "sentence-transformers==3.0.1",
+    "pydantic==2.13.5",
+    "rank-bm25==0.2.2",
+    "requests==2.34.2",
+    "sentence-transformers==5.7.0",
     "streamlit==1.35.0",
+    "transformers==4.57.6",
     "uvicorn==0.29.0",
 ]
 

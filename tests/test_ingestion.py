@@ -1,43 +1,43 @@
 import json
 
 import faiss
-import numpy as np
+import pytest
 
-from rag_retrieval_engine.config import AppConfig
-from rag_retrieval_engine.ingestion import build_index
+from rag_retrieval_engine.ingestion import build_index, chunk_documents
 
 
-def test_build_index_writes_artifacts(tmp_path) -> None:
-    docs_dir = tmp_path / "docs"
-    docs_dir.mkdir()
-    (docs_dir / "sample.txt").write_text("alpha beta gamma delta epsilon", encoding="utf-8")
+def test_build_index_writes_manifest_and_chunks(config, tokenizer, embeddings) -> None:
+    config.docs_dir.joinpath("sample.txt").write_text("alpha beta gamma delta epsilon zeta", encoding="utf-8")
 
-    config = AppConfig(
-        project_root=tmp_path,
-        docs_dir=docs_dir,
-        index_path=tmp_path / "faiss.index",
-        metadata_path=tmp_path / "metadata.json",
-        ollama_url="http://localhost:11434/api/generate",
-        model_name="qwen2.5:7b",
-        embed_model_name="test-embedder",
-        top_k=5,
-        rerank_top_n=2,
-        eval_threshold=0.08,
-        api_url="http://localhost:8000/ask",
-    )
+    summary = build_index(config, embeddings=embeddings, tokenizer=tokenizer)
 
-    def fake_embed_texts(texts, _config):
-        return np.array([[1.0, 0.0] for _ in texts], dtype=np.float32)
-
-    summary = build_index(config, chunk_size=3, overlap=1, embed_fn=fake_embed_texts)
-
-    assert summary["document_count"] == 1
-    assert summary["chunk_count"] == 3
-    assert config.index_path.exists()
-    assert config.metadata_path.exists()
-
+    manifest = json.loads(config.manifest_path.read_text(encoding="utf-8"))
+    records = json.loads(config.metadata_path.read_text(encoding="utf-8"))
+    assert summary == {"document_count": 1, "chunk_count": len(records)}
+    assert manifest["embedding_model"] == "test-embedder"
+    assert manifest["embedding_dimension"] == 2
+    assert manifest["chunk_size"] == 5
+    assert manifest["chunk_overlap"] == 2
+    assert manifest["chunk_count"] == len(records)
+    assert len(manifest["source_hashes"]["sample.txt"]) == 64
     index = faiss.read_index(str(config.index_path))
-    metadata = json.loads(config.metadata_path.read_text(encoding="utf-8"))
+    assert index.ntotal == len(records)
+    assert index.metric_type == faiss.METRIC_INNER_PRODUCT
+    assert records[0]["metadata"]["chunk_id"] == "sample_txt_chunk_0001"
 
-    assert index.ntotal == 3
-    assert metadata[0]["source"] == "sample.txt"
+
+def test_empty_files_are_skipped_and_all_empty_corpus_fails(config, tokenizer) -> None:
+    config.docs_dir.joinpath("empty.txt").write_text("  \n ", encoding="utf-8")
+    with pytest.raises(ValueError, match="All documents are empty"):
+        chunk_documents(config, tokenizer)
+
+    config.docs_dir.joinpath("useful.txt").write_text("useful information", encoding="utf-8")
+    chunks, hashes = chunk_documents(config, tokenizer)
+    assert len(chunks) == 1
+    assert set(hashes) == {"empty.txt", "useful.txt"}
+
+
+def test_non_utf8_file_has_clear_error(config, tokenizer) -> None:
+    config.docs_dir.joinpath("bad.txt").write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="must be UTF-8"):
+        chunk_documents(config, tokenizer)

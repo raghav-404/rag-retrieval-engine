@@ -8,7 +8,7 @@ def main() -> None:
     config = AppConfig.from_env()
     st.set_page_config(page_title="RAG Chat", page_icon=":books:")
     st.title("Document Q&A")
-    st.caption(f"Demo UI for the local RAG API via Ollama ({config.model_name})")
+    st.caption("Demo UI for the RAG API (answer generation arrives in Phase 2)")
     history = st.session_state.setdefault("history", [])
     for msg in history:
         with st.chat_message(msg["role"]):
