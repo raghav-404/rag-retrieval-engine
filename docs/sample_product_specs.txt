@@ -4,23 +4,23 @@ Product name: Local Assistant
 Version: 1.0
 
 Purpose:
-Local Assistant is a document question-answering tool that runs on a user's machine.
-It is intended for privacy-sensitive teams that want to avoid external data transfer.
+Local Assistant is a document question-answering tool with local retrieval and Groq answer generation.
+It helps teams search their own text documents and see which chunks supported an answer.
 
 Key features:
 - FastAPI backend for queries
 - Streamlit frontend for chatting
 - FAISS vector search for semantic retrieval
 - BM25-style keyword scoring for sparse retrieval
-- Query rewrite step before searching
-- Basic faithfulness check after generating an answer
+- Optional query rewrite after weak retrieval
+- Source citations and latency metrics with each answer
 
 Technical constraints:
 - Supports text documents only
 - Requires an existing FAISS index before startup
 - Uses normalized embeddings for cosine-style similarity
-- Depends on a local Ollama model for rewriting and answer generation
+- Sends retrieved context to Groq for answer generation
 
 Recommended usage:
 The best results come from concise documents with clear headings and repeated terminology.
-If a question is vague, the query rewrite step should make it more retrieval-friendly.
+If retrieval is weak, the optional query rewrite step can search a second time.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "created_at": "2026-10-01T17:10:10.376155+00:00",
+  "created_at": "2026-10-01T17:14:08.264700+00:00",
   "dataset_sha256": "2bfe8b1eb365f07aad4626037467b2728f3a6f8ecb045c8a9bf97459240bde5a",
   "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
   "chunk_count": 4,
@@ -11,7 +11,7 @@
       "recall_at_3": 1.0,
       "recall_at_5": 1.0,
       "mrr": 1.0,
-      "average_retrieval_ms": 6.28,
+      "average_retrieval_ms": 4.54,
       "error_count": 0,
       "error_rate": 0.0,
       "cases": [
@@ -75,8 +75,8 @@
       "recall_at_1": 0.5,
       "recall_at_3": 0.9167,
       "recall_at_5": 1.0,
-      "mrr": 0.8333,
-      "average_retrieval_ms": 0.08,
+      "mrr": 0.8056,
+      "average_retrieval_ms": 0.09,
       "error_count": 0,
       "error_rate": 0.0,
       "cases": [
@@ -120,8 +120,8 @@
           "question": "What is the Local Assistant product for?",
           "retrieved_chunk_ids": [
             "sample_faq_txt_chunk_0001",
-            "sample_product_specs_txt_chunk_0001",
             "sample_support_policy_txt_chunk_0001",
+            "sample_product_specs_txt_chunk_0001",
             "sample_company_overview_txt_chunk_0001"
           ]
         },
@@ -141,7 +141,7 @@
       "recall_at_3": 1.0,
       "recall_at_5": 1.0,
       "mrr": 1.0,
-      "average_retrieval_ms": 3.61,
+      "average_retrieval_ms": 3.78,
       "error_count": 0,
       "error_rate": 0.0,
       "cases": [

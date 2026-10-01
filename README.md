@@ -1,213 +1,87 @@
-# rag-retrieval-engine
+# Hybrid RAG Retrieval Engine
 
-A local-first Retrieval-Augmented Generation system for document question answering, built with FastAPI, FAISS, sentence-transformers, Ollama, and a small Streamlit demo UI.
-
-It focuses on the practical parts of a small RAG system: document ingestion, chunking, embedding, hybrid retrieval, grounding, local model orchestration, and lightweight evaluation.
-
-## Overview
-
-Many RAG demos are dense-only retrieval wrapped in a chat UI. This repo is more deliberate about the retrieval stack and the system tradeoffs:
-
-- combines dense retrieval with BM25-style sparse scoring
-- rewrites the user query before retrieval to improve recall
-- separates ingestion from serving so the data pipeline is explicit
-- keeps the serving layer simple while preserving a real API boundary
-- runs entirely locally with Ollama, which makes model behavior easier to test and reason about
-- includes a small test suite covering chunking, ingestion, retrieval shape, and API health
-
-## What It Does
-
-Given a folder of `.txt` documents, the system:
-
-1. cleans and chunks the documents
-2. embeds each chunk with `all-MiniLM-L6-v2`
-3. stores vectors in FAISS and chunk metadata in JSON
-4. rewrites the user query for better retrieval
-5. combines dense similarity with BM25-style sparse scoring
-6. builds a grounded context window from the top results
-7. asks a local Ollama model to answer using only that context
-8. computes a lightweight answer grounding score and retries with the original query when needed
-
-## Stack
-
-- Python 3.12+
-- FastAPI
-- Streamlit
-- FAISS
-- sentence-transformers
-- Ollama
-- pytest
+A placement-focused, production-aware document Q&A project. It makes each retrieval step visible, compares retrieval methods on labeled questions, and returns an answer with chunk citations and timing. The code is intentionally small enough to explain in an interview.
 
 ## Architecture
 
 ```text
-docs/*.txt
-  -> ingestion.py
-  -> faiss.index + metadata.json
-  -> retrieval.py
-  -> FastAPI /ask
-  -> Streamlit demo UI
+docs/*.txt → token-aware chunks → normalized MiniLM embeddings → FAISS
+                         └───────────────────────────────→ BM25
+question → independent FAISS and BM25 searches → weighted RRF (c=60)
+         → optional CrossEncoder rerank → labeled context
+         → ChatPromptTemplate → ChatGroq → answer, sources, metrics, request ID
 ```
 
-Core modules:
+LangChain supplies `Document`, the token-aware splitter, Hugging Face embeddings, FAISS and BM25 retrievers, `EnsembleRetriever`, prompt templates, and `ChatGroq`. The service keeps retrieval, optional reranking, context construction, and generation as explicit steps. FastAPI loads the models and indexes once at startup. Streamlit is an optional demo UI.
 
-- `src/rag_retrieval_engine/config.py`: local settings for paths, model names, top-k, and Ollama URL
-- `src/rag_retrieval_engine/ingestion.py`: document loading, chunking, embedding, and index building
-- `src/rag_retrieval_engine/retrieval.py`: artifact loading, hybrid retrieval, context assembly, and answer generation
-- `src/rag_retrieval_engine/api/app.py`: FastAPI app with `/health` and `/ask`
-- `src/rag_retrieval_engine/ui/streamlit_app.py`: lightweight demo client
+## Features and stack
 
-Retrieval pipeline:
+- Python 3.12, `uv`, FastAPI, Pydantic, LangChain, Sentence Transformers, FAISS, BM25, Groq, pytest, and optional Streamlit.
+- Stable chunk IDs and a manifest that checks source hashes, artifact hashes, chunk settings, embedding model, and vector dimensions.
+- Dense, sparse, and hybrid retrieval modes. Dense and BM25 search the complete corpus independently; RRF combines ranks rather than incompatible raw scores.
+- Optional query rewrite after a documented poor-retrieval check and optional CrossEncoder reranking. Both are off by default.
+- Structured `/ask` responses with citations, timings, and request IDs. Provider, timeout, retrieval, and invalid-request failures have distinct HTTP responses.
 
-```text
-question
-  -> query rewrite
-  -> embedding lookup in FAISS
-  -> BM25-style lexical scoring
-  -> score fusion
-  -> top-k context assembly
-  -> Ollama answer generation
-  -> lightweight grounding check
-```
-
-Thin root entrypoints are kept so local commands stay simple:
-
-- `python ingest.py`
-- `uvicorn backend:app --reload`
-- `streamlit run app.py`
-
-## Applied AI Notes
-
-- Dense retrieval handles semantic similarity, while the BM25-style component helps recover lexical matches that embeddings can miss.
-- Query rewriting is intentionally small and cheap, but it improves the chances of retrieving the right chunks for underspecified questions.
-- The answer layer is grounded against retrieved context rather than treating the LLM as the source of truth.
-- The evaluation step is simple, but it reflects the right instinct: retrieval quality should influence generation behavior.
-- The whole stack is local-first, which is useful for debugging, iteration speed, privacy-sensitive use cases, and cost control.
-
-## Design Choices
-
-- The project emphasizes retrieval-system behavior, not just prompt orchestration.
-- The code is modular without introducing extra infrastructure.
-- FastAPI is treated as the real interface; Streamlit is just a demo surface.
-- The app does not assume cloud infrastructure, vector databases, or extra services unless they are actually needed.
-- Error handling focuses on realistic failure modes like missing retrieval artifacts or bad requests.
-
-## Local Setup
-
-### 1. Install dependencies
-
-Using `uv`:
+## Setup and run
 
 ```bash
-uv sync
+uv sync --locked --extra dev
+cp .env.example .env
 ```
 
-Or using the existing virtualenv approach:
+Edit `.env` with your Groq API key and a chat model available to your Groq account. Load it into the shell before starting the API:
 
 ```bash
-pip install -r requirements.txt
+set -a
+source .env
+set +a
+uv run python ingest.py
+uv run uvicorn backend:app --reload
 ```
 
-### 2. Start Ollama
+Add or change `.txt` files in `docs/`, then rerun ingestion. The generated FAISS index, chunk metadata, and manifest stay local and are ignored by Git. The first ingestion downloads the public MiniLM embedding model. API startup needs the index and Groq settings; it fails with an explanatory error if they are missing or incompatible.
 
-Pull the model:
+In another terminal, the optional UI runs with `uv run streamlit run app.py`.
 
-```bash
-ollama pull qwen2.5:7b
-```
-
-Run Ollama locally so the API is available at `http://localhost:11434`.
-
-### 3. Add documents
-
-Place `.txt` files in `docs/`.
-
-Sample files included in this repo:
-
-- `docs/sample_company_overview.txt`
-- `docs/sample_faq.txt`
-- `docs/sample_product_specs.txt`
-- `docs/sample_support_policy.txt`
-
-### 4. Build the retrieval artifacts
-
-```bash
-python ingest.py
-```
-
-This creates:
-
-- `faiss.index`
-- `metadata.json`
-
-### 5. Run the API
-
-```bash
-uvicorn backend:app --reload
-```
-
-### 6. Run the demo UI
-
-```bash
-streamlit run app.py
-```
-
-## How To Test
-
-Automated tests:
-
-```bash
-python -m pytest --basetemp .pytest-tmp -p no:cacheprovider
-```
-
-Manual API smoke test:
+## API
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What are the support hours?","mode":"hybrid"}'
 ```
 
-```bash
-curl -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" -d "{\"question\":\"What is the support response window?\"}"
-```
-
-## Example API Response
+`POST /retrieve` accepts the same question and mode plus an optional `k` for inspecting retrieved chunks. `/ask` returns this shape; answer text and timing depend on the run:
 
 ```json
 {
-  "answer": "Support requests are typically handled within the documented response window.",
-  "sources": ["sample_support_policy.txt"],
-  "rewritten_query": "support response window policy",
-  "eval_score": 0.312
+  "answer": "...",
+  "sources": [{"source": "sample_support_policy.txt", "chunk_id": "sample_support_policy_txt_chunk_0001", "rank": 1}],
+  "metrics": {"retrieval_ms": 0.0, "generation_ms": 0.0, "total_ms": 0.0, "retrieval_mode": "hybrid", "reranker_enabled": false, "query_rewritten": false},
+  "request_id": "..."
 }
 ```
 
-## Tradeoffs
+## Tests and evaluation
 
-This repo is intentionally strong on retrieval clarity and local reproducibility, not breadth.
+```bash
+uv run pytest -q
+uv run python evaluate.py
+```
 
-What it does well:
+The default evaluation calls only retrieval, so it needs no Groq key or credits. Six labeled questions live in `evaluation/questions.jsonl`; the measured report is in `evaluation/results/retrieval_baseline.json`. Use `RAG_RERANKER_ENABLED=true uv run python evaluate.py --output evaluation/results/reranked.json` to add the reranked mode without replacing the baseline. `--with-answers` separately calls Groq and checks expected keywords; keyword matching is not a faithfulness measure.
 
-- clear end-to-end RAG flow
-- understandable retrieval and serving boundaries
-- fully local model + retrieval stack
-- easy experimentation with chunking, retrieval, and prompting behavior
+| Mode | Recall@1 | Recall@3 | Recall@5 | MRR | Average retrieval |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dense | 0.8333 | 1.0000 | 1.0000 | 1.0000 | 4.54 ms |
+| BM25 | 0.5000 | 0.9167 | 1.0000 | 0.8056 | 0.09 ms |
+| Hybrid | 0.8333 | 1.0000 | 1.0000 | 1.0000 | 3.78 ms |
 
-What is still prototype-level:
+These values come from one local run on four sample chunks and six questions. Recall@5 is automatically 1.0 when every chunk is returned, so this is a reproducible smoke benchmark rather than evidence of general performance. Latency varies by machine and cache state. Reranking and answer generation were not included in this baseline.
 
-- `.txt`-only ingestion
-- heuristic reranking and lightweight grounding score
-- no auth, persistence layer, or background jobs
-- no production observability or deployment story
+## Limits and next steps
 
-## What I Would Build Next
+Ingestion supports UTF-8 `.txt` files. The labels are small and tied to the sample documents. Source citations identify retrieved chunks; they do not prove every generated claim is supported. The optional rewrite trigger is a simple lexical heuristic. Groq requires network access, and automated tests mock it.
 
-- support Markdown and PDF ingestion
-- cache embeddings and artifact metadata more explicitly
-- add retrieval diagnostics such as score breakdowns and hit inspection
-- benchmark chunking and retrieval settings on a small evaluation set
-- improve groundedness evaluation beyond token overlap
-- optionally swap FAISS + local files for a more scalable artifact layer if the use case required it
-
-## Summary
-
-A small, local-first hybrid RAG system with explicit ingestion, retrieval, and serving boundaries. The implementation stays simple, but still captures the parts of the workflow that matter most in practice: retrieval quality, grounded generation, and repeatable local testing.
+The next useful improvement is a larger, independently labeled evaluation set with harder negatives, followed by error analysis and chunking experiments. Markdown or PDF loading could be added when a real document set calls for it.
