@@ -4,6 +4,8 @@ import sys
 import pytest
 
 from langchain_core.embeddings import Embeddings
+from langchain_core.documents import Document
+from langchain_core.messages import AIMessage
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -29,6 +31,41 @@ class StaticEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         return self.vectors.get(text, self.default)
+
+
+class FakeChatModel:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def ainvoke(self, messages):
+        self.calls.append(messages)
+        result = self.responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return AIMessage(content=result)
+
+
+class StubEngine:
+    def __init__(self, documents: list[Document], *, results_by_query=None):
+        self.documents = documents
+        self.results_by_query = results_by_query or {}
+        self.calls = []
+
+    def search(self, question, mode="hybrid", *, k=None):
+        self.calls.append((question, mode, k))
+        documents = self.results_by_query.get(question, self.documents)
+        return documents[:k] if k else documents
+
+
+@pytest.fixture
+def fake_model_class():
+    return FakeChatModel
+
+
+@pytest.fixture
+def stub_engine_class():
+    return StubEngine
 
 
 @pytest.fixture

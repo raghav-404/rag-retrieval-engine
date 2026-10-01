@@ -21,6 +21,12 @@ class AppConfig:
     rrf_constant: int = 60
     dense_weight: float = 0.5
     sparse_weight: float = 0.5
+    groq_model: str = ""
+    groq_timeout: float = 30.0
+    rewrite_enabled: bool = False
+    reranker_enabled: bool = False
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    rerank_candidates: int = 20
     api_url: str = "http://localhost:8000/ask"
 
     def validate(self) -> None:
@@ -30,6 +36,8 @@ class AppConfig:
             raise ValueError("Retriever candidate counts and final_k must be positive.")
         if self.rrf_constant < 0 or min(self.dense_weight, self.sparse_weight) <= 0:
             raise ValueError("RRF constant must be nonnegative and weights must be positive.")
+        if self.groq_timeout <= 0 or self.rerank_candidates <= 0:
+            raise ValueError("Groq timeout and rerank candidate count must be positive.")
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -49,5 +57,11 @@ class AppConfig:
             rrf_constant=int(os.getenv("RAG_RRF_CONSTANT", 60)),
             dense_weight=float(os.getenv("RAG_DENSE_WEIGHT", 0.5)),
             sparse_weight=float(os.getenv("RAG_SPARSE_WEIGHT", 0.5)),
+            groq_model=os.getenv("GROQ_MODEL", ""),
+            groq_timeout=float(os.getenv("GROQ_TIMEOUT", 30)),
+            rewrite_enabled=os.getenv("RAG_REWRITE_ENABLED", "false").lower() == "true",
+            reranker_enabled=os.getenv("RAG_RERANKER_ENABLED", "false").lower() == "true",
+            reranker_model=os.getenv("RAG_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L6-v2"),
+            rerank_candidates=int(os.getenv("RAG_RERANK_CANDIDATES", 20)),
             api_url=os.getenv("RAG_API_URL", "http://localhost:8000/ask"),
         )

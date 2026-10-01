@@ -8,7 +8,7 @@ def main() -> None:
     config = AppConfig.from_env()
     st.set_page_config(page_title="RAG Chat", page_icon=":books:")
     st.title("Document Q&A")
-    st.caption("Demo UI for the RAG API (answer generation arrives in Phase 2)")
+    st.caption("Ask questions about the indexed documents")
     history = st.session_state.setdefault("history", [])
     for msg in history:
         with st.chat_message(msg["role"]):
@@ -21,15 +21,20 @@ def main() -> None:
         st.markdown(question)
     with st.chat_message("assistant"):
         try:
-            data = requests.post(config.api_url, json={"question": question}, timeout=180).json()
+            response = requests.post(config.api_url, json={"question": question}, timeout=180)
+            data = response.json()
             if "detail" in data:
-                st.error(data["detail"])
+                detail = data["detail"]
+                st.error(detail.get("message", detail) if isinstance(detail, dict) else detail)
                 return
-            st.markdown(data.get("answer", "No answer returned."))
+            response.raise_for_status()
+            answer = data["answer"]
+            st.markdown(answer)
+            sources = ", ".join(item["source"] for item in data["sources"])
             st.caption(
-                f"Sources: {', '.join(data.get('sources', [])) or 'N/A'} | "
-                f"Rewritten: {data.get('rewritten_query', '')} | Score: {data.get('eval_score', 0)}"
+                f"Sources: {sources or 'N/A'} | "
+                f"Latency: {data['metrics']['total_ms']:.1f} ms"
             )
-            history.append({"role": "assistant", "content": data.get("answer", "No answer returned.")})
+            history.append({"role": "assistant", "content": answer})
         except Exception as exc:
             st.error(f"Backend error: {exc}")

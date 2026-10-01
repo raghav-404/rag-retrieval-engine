@@ -1,0 +1,6 @@
+{"question":"How do I add documents to the system?","relevant_chunk_ids":["sample_faq_txt_chunk_0001","sample_company_overview_txt_chunk_0001"],"expected_keywords":["docs","ingestion"]}
+{"question":"What are the support hours?","relevant_chunk_ids":["sample_support_policy_txt_chunk_0001"],"expected_keywords":["Monday","Friday"]}
+{"question":"How is a critical issue defined?","relevant_chunk_ids":["sample_support_policy_txt_chunk_0001"],"expected_keywords":["unavailable"]}
+{"question":"What file type does the project support?","relevant_chunk_ids":["sample_faq_txt_chunk_0001","sample_product_specs_txt_chunk_0001"],"expected_keywords":["text"]}
+{"question":"What is the Local Assistant product for?","relevant_chunk_ids":["sample_product_specs_txt_chunk_0001"],"expected_keywords":["question"]}
+{"question":"What does RAG Retrieval Co. build?","relevant_chunk_ids":["sample_company_overview_txt_chunk_0001"],"expected_keywords":["search"]}

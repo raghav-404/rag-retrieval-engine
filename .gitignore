@@ -14,6 +14,7 @@ wheels/
 # Local environment files
 .env
 .env.*
+!.env.example
 
 # Generated retrieval artifacts
 faiss.index
