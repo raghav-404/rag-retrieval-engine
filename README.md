@@ -1,6 +1,6 @@
 # Hybrid RAG Retrieval Engine
 
-A placement-focused, production-aware document Q&A project. It makes each retrieval step visible, compares retrieval methods on labeled questions, and returns an answer with chunk citations and timing. The code is intentionally small enough to explain in an interview.
+A document question-answering service with hybrid retrieval and source citations. It makes each retrieval step visible, compares retrieval methods on labeled questions, and returns an answer with chunk citations and timing.
 
 ## Architecture
 
